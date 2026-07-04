@@ -39,3 +39,4 @@ class Job(Base):
     dead_lettered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    celery_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

@@ -28,6 +28,7 @@ class JobResponse(BaseModel):
     next_retry_at: Optional[datetime] = None
     dead_lettered_at: Optional[datetime] = None
     last_error_message: Optional[str] = None
+    celery_task_id: Optional[str] = None
 
 
 class JobPageResponse(BaseModel):
