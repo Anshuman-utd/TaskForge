@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api.routes.jobs import router as jobs_router
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.redis import get_redis_client
@@ -9,6 +10,8 @@ app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
 )
+
+app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["Jobs"])
 
 
 @app.get("/")
