@@ -1,10 +1,14 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from app.models.job_attempt import JobAttempt
+    from app.models.job_event import JobEvent
 
 from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -40,3 +44,14 @@ class Job(Base):
 
     last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     celery_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    attempts: Mapped[list["JobAttempt"]] = relationship(
+        "JobAttempt",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+    events: Mapped[list["JobEvent"]] = relationship(
+        "JobEvent",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )

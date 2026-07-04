@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.job import JobCreate, JobResponse, JobPageResponse
+from app.schemas.job import JobCreate, JobResponse, JobPageResponse, JobDetailResponse
 from app.services.job_service import JobService
 
 router = APIRouter()
@@ -57,12 +57,31 @@ def list_jobs(
     )
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", response_model=JobDetailResponse)
 def get_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
     """
-    Retrieves a single job by UUID.
+    Retrieves a single job by UUID with chronological attempts and events.
     """
     db_job = JobService.get_job_by_id(db, job_id)
     if not db_job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobResponse.model_validate(db_job)
+
+    # Sort attempts and events chronologically for deterministic ordering
+    db_job.attempts = sorted(db_job.attempts, key=lambda x: x.attempt_number)
+    db_job.events = sorted(db_job.events, key=lambda x: x.timestamp)
+
+    return JobDetailResponse.model_validate(db_job)
+
+
+@router.post("/{job_id}/requeue", response_model=JobResponse)
+def requeue_job(job_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Requeues a dead-lettered job.
+    """
+    try:
+        db_job = JobService.requeue_job(db, job_id)
+        if not db_job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return JobResponse.model_validate(db_job)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

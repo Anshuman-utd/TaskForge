@@ -31,6 +31,36 @@ class JobResponse(BaseModel):
     celery_task_id: Optional[str] = None
 
 
+class JobAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    attempt_number: int
+    worker_name: Optional[str] = None
+    status: str
+    celery_task_id: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error_message: Optional[str] = None
+
+
+class JobEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    event_type: str
+    timestamp: datetime
+    details: Optional[dict[str, Any]] = None
+
+
+class JobDetailResponse(JobResponse):
+    attempts: list[JobAttemptResponse] = Field(default_factory=list)
+    events: list[JobEventResponse] = Field(default_factory=list)
+
+
 class JobPageResponse(BaseModel):
     items: list[JobResponse]
     total: int
