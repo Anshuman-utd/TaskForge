@@ -50,6 +50,10 @@ class JobService:
         db.add(created_event)
         db.commit()
 
+        # Publish event after commit
+        from app.core.events import publish_job_event
+        publish_job_event(db_job, "job_created")
+
         # Dispatch if the job type is supported
         celery_task_id = JobService.dispatch_job(db, db_job)
         if celery_task_id:
@@ -65,6 +69,9 @@ class JobService:
             db.add(dispatch_event)
             db.commit()
             db.refresh(db_job)
+
+            # Publish event after commit
+            publish_job_event(db_job, "job_dispatched", {"celery_task_id": celery_task_id})
 
         return db_job
 
@@ -199,6 +206,17 @@ class JobService:
             db.add(event)
             db.commit()
             db.refresh(db_job)
+
+            # Publish event after commit
+            from app.core.events import publish_job_event
+            publish_job_event(
+                db_job,
+                "processing_started",
+                {
+                    "attempt_number": db_job.attempt_count,
+                    "celery_task_id": db_job.celery_task_id,
+                }
+            )
         return db_job
 
     @staticmethod
@@ -241,6 +259,10 @@ class JobService:
             db.add(event)
             db.commit()
             db.refresh(db_job)
+
+            # Publish event after commit
+            from app.core.events import publish_job_event
+            publish_job_event(db_job, "completed", {"result": result})
         return db_job
 
     @staticmethod
@@ -285,6 +307,18 @@ class JobService:
         db.add(failed_event)
         db.commit()
 
+        # Publish failed event after commit
+        from app.core.events import publish_job_event
+        publish_job_event(
+            db_job,
+            "attempt_failed",
+            {
+                "attempt_number": db_job.attempt_count,
+                "error": error_message,
+                "celery_task_id": db_job.celery_task_id,
+            }
+        )
+
         # Retry Eligibility Logic
         # - attempt_count: number of attempts already started
         # - max_retries: number of retries allowed after the first attempt
@@ -316,6 +350,18 @@ class JobService:
             db.commit()
             db.refresh(db_job)
 
+            # Publish retry scheduled event after commit
+            publish_job_event(
+                db_job,
+                "retry_scheduled",
+                {
+                    "attempt_number": db_job.attempt_count,
+                    "countdown_seconds": delay,
+                    "next_retry_at": next_retry.isoformat(),
+                    "error": error_message,
+                }
+            )
+
             # Centralized dispatch reuse
             new_task_id = JobService.dispatch_job(db, db_job, countdown=delay)
             if new_task_id:
@@ -335,6 +381,17 @@ class JobService:
                 db.add(dispatch_event)
                 db.commit()
                 db.refresh(db_job)
+
+                # Publish job dispatched event after commit
+                publish_job_event(
+                    db_job,
+                    "job_dispatched",
+                    {
+                        "attempt_number": db_job.attempt_count + 1,
+                        "countdown_seconds": delay,
+                        "celery_task_id": new_task_id,
+                    }
+                )
         else:
             # Exhausted retries -> Dead letter
             db_job.status = "dead_lettered"
@@ -353,6 +410,16 @@ class JobService:
             db.add(dlq_event)
             db.commit()
             db.refresh(db_job)
+
+            # Publish dead letter event after commit
+            publish_job_event(
+                db_job,
+                "dead_lettered",
+                {
+                    "total_attempts": db_job.attempt_count,
+                    "error": error_message,
+                }
+            )
 
         return db_job
 
@@ -389,6 +456,10 @@ class JobService:
         db.add(requeue_event)
         db.commit()
 
+        # Publish event after commit
+        from app.core.events import publish_job_event
+        publish_job_event(db_job, "requeued")
+
         # Centralized dispatch reuse
         new_task_id = JobService.dispatch_job(db, db_job)
         if new_task_id:
@@ -405,4 +476,35 @@ class JobService:
             db.commit()
             db.refresh(db_job)
 
+            # Publish event after commit
+            publish_job_event(db_job, "job_dispatched", {"celery_task_id": new_task_id})
+
         return db_job
+
+    @staticmethod
+    def get_queue_stats(db: Session) -> dict:
+        """
+        Retrieves stats (counts of jobs per status) grouped by queue_name.
+        Returns a dictionary shaped to match QueueStatsResponse:
+        {"items": [QueueStatsItem, ...]}
+        """
+        # Query counts grouped by queue_name and status
+        query = select(Job.queue_name, Job.status, func.count(Job.id)).group_by(Job.queue_name, Job.status)
+        rows = db.execute(query).all()
+
+        # Temporary dictionary mapping queue_name to stats
+        queue_map = {}
+        for queue_name, status, count in rows:
+            if queue_name not in queue_map:
+                queue_map[queue_name] = {
+                    "queue_name": queue_name,
+                    "queued": 0,
+                    "processing": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "dead_lettered": 0,
+                }
+            if status in queue_map[queue_name]:
+                queue_map[queue_name][status] = count
+
+        return {"items": list(queue_map.values())}

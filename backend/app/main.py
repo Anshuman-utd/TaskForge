@@ -1,17 +1,57 @@
-from fastapi import FastAPI
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import text
 
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.queues import router as queues_router
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.redis import get_redis_client
+from app.core.event_listener import redis_event_listener
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start Redis Pub/Sub event listener background task
+    listener_task = asyncio.create_task(redis_event_listener())
+    yield
+    # Cleanup task on shutdown
+    listener_task.cancel()
+    try:
+        await listener_task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
+    lifespan=lifespan,
 )
 
 app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["Jobs"])
+app.include_router(queues_router, prefix="/api/v1/queues", tags=["Queues"])
+
+
+@app.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket):
+    from app.core.websocket_manager import manager
+    
+    await manager.connect(websocket)
+    try:
+        # Keepalive read loop
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("app.main")
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 
 @app.get("/")

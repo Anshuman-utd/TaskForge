@@ -6,6 +6,7 @@ from app.schemas.job import (
     JobEventResponse,
     JobDetailResponse,
 )
+from app.schemas.queue import QueueStatsItem, QueueStatsResponse
 
 __all__ = [
     "JobCreate",
@@ -14,4 +15,7 @@ __all__ = [
     "JobAttemptResponse",
     "JobEventResponse",
     "JobDetailResponse",
+    "QueueStatsItem",
+    "QueueStatsResponse",
 ]
+
