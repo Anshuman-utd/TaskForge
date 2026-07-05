@@ -1,6 +1,6 @@
 # TaskForge 
 
-##TaskForge is a distributed job processing platform and operator control plane built to demonstrate backend system design, database-backed reliability patterns, and real-time observability.
+### TaskForge is a distributed job processing platform and operator control plane built to demonstrate backend system design, database-backed reliability patterns, and real-time observability.
 
 <p align="left">
   <img src="https://img.shields.io/badge/FastAPI-0d1117?style=for-the-badge&logo=fastapi&logoColor=009688" />
