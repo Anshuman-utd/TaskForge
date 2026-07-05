@@ -1,119 +1,129 @@
-# A. High-Level System Architecture
 
-```md id="s91cgo"
-## System Architecture
+And here’s the **single big architecture diagram** for `docs/architecture.md`:
 
-```mermaid
-flowchart LR
-    U[Operator / User]
-    FE[Next.js Operator Dashboard]
-    API[FastAPI API]
-    DB[(PostgreSQL)]
-    REDIS[(Redis)]
-    CELERY[Celery Broker / Queue]
-    WORKER[Celery Worker]
-    WS[WebSocket Event Stream]
-
-    U --> FE
-    FE -->|REST API| API
-    FE -->|WebSocket| WS
-
-    API --> DB
-    API --> REDIS
-    API -->|Dispatch Job| CELERY
-
-    CELERY --> WORKER
-    WORKER -->|Update job status / attempts / results| DB
-    WORKER -->|Publish realtime job events| REDIS
-
-    REDIS --> WS
-    WS --> FE
-
-
-# B. Job Lifecycle — Success Flow
-
-```md id="94t2vi"
-## Job Lifecycle — Success Flow
+```md
+# TaskForge Architecture
 
 ```mermaid
-sequenceDiagram
-    participant User as Operator Dashboard
-    participant API as FastAPI API
-    participant DB as PostgreSQL
-    participant Broker as Redis / Celery Queue
-    participant Worker as Celery Worker
-    participant WS as WebSocket Stream
-
-    User->>API: POST /api/v1/jobs (demo_sleep)
-    API->>DB: Create job row (status=queued)
-    API->>Broker: Dispatch Celery task
-    API-->>User: Job created response
-
-    Worker->>Broker: Pull queued task
-    Worker->>DB: Mark job processing + create attempt
-    Worker->>WS: Publish job.processing event
-
-    Worker->>Worker: Execute task logic
-    Worker->>DB: Mark completed + save result
-    Worker->>WS: Publish job.completed event
-
-
-# C. Job Lifecycle — Failure, Retry, DLQ
-
-```md id="n4akbk"
-## Job Lifecycle — Failure, Retry & Dead-Letter Queue
-
-```mermaid
-sequenceDiagram
-    participant User as Operator Dashboard
-    participant API as FastAPI API
-    participant DB as PostgreSQL
-    participant Broker as Redis / Celery Queue
-    participant Worker as Celery Worker
-    participant WS as WebSocket Stream
-
-    User->>API: POST /api/v1/jobs (demo_fail)
-    API->>DB: Create queued job
-    API->>Broker: Dispatch task
-    API-->>User: Job created response
-
-    Worker->>Broker: Pull task
-    Worker->>DB: Mark processing + create attempt
-    Worker->>WS: Publish job.processing
-
-    Worker->>Worker: Execute task
-    Worker->>DB: Mark attempt failed
-    Worker->>WS: Publish job.failed
-
-    alt retries remain
-        Worker->>DB: Set next_retry_at + status=queued
-        Worker->>Broker: Re-dispatch with backoff
-        Worker->>WS: Publish job.retrying
-    else retries exhausted
-        Worker->>DB: Mark job dead_lettered
-        Worker->>WS: Publish job.dead_lettered
+flowchart TB
+    %% =========================
+    %% CLIENT / CONTROL PLANE
+    %% =========================
+    subgraph CLIENT["Operator Control Plane"]
+        USER[Operator / User]
+        FE[Next.js Dashboard]
+        PAGES[Dashboard / Jobs / Job Detail / Dead Letter / Queues]
+        MODAL[Dispatch Job Modal]
+        LIVE[Live Events Feed]
     end
 
+    %% =========================
+    %% API LAYER
+    %% =========================
+    subgraph API_LAYER["FastAPI Backend"]
+        API[FastAPI App]
+        JOB_ROUTES[Jobs API\nPOST /jobs\nGET /jobs\nGET /jobs/:id\nPOST /jobs/:id/requeue]
+        QUEUE_ROUTES[Queue Stats API\nGET /queues]
+        WS_ENDPOINT[WebSocket Endpoint\n/ws/dashboard]
+        JOB_SERVICE[Job Service Layer]
+        EVENTS[Realtime Event Publisher]
+        LISTENER[Redis Event Listener]
+    end
 
-# D. Requeue Flow from Dead Letter Queue
+    %% =========================
+    %% PERSISTENCE LAYER
+    %% =========================
+    subgraph DATA_LAYER["Persistence Layer"]
+        DB[(PostgreSQL)]
+        JOBS_TABLE[(jobs)]
+        ATTEMPTS_TABLE[(job_attempts)]
+        EVENTS_TABLE[(job_events)]
+    end
 
-```md id="52zzdy"
-## Dead-Letter Requeue Flow
+    %% =========================
+    %% QUEUE / WORKER LAYER
+    %% =========================
+    subgraph WORKER_LAYER["Queue + Worker Layer"]
+        REDIS[(Redis)]
+        CELERY_QUEUE[Celery Queue / Broker]
+        WORKER[Celery Worker]
+        TASK_SLEEP[demo_sleep task]
+        TASK_FAIL[demo_fail task]
+    end
 
-```mermaid
-sequenceDiagram
-    participant User as Operator Dashboard
-    participant API as FastAPI API
-    participant DB as PostgreSQL
-    participant Broker as Redis / Celery Queue
-    participant Worker as Celery Worker
-    participant WS as WebSocket Stream
+    %% =========================
+    %% DASHBOARD FLOW
+    %% =========================
+    USER --> FE
+    FE --> PAGES
+    FE --> MODAL
+    FE --> LIVE
 
-    User->>API: POST /api/v1/jobs/{job_id}/requeue
-    API->>DB: Reset retry / DLQ metadata
-    API->>Broker: Re-dispatch task
-    API->>WS: Publish job.requeued
-    API-->>User: Updated queued job
+    %% =========================
+    %% FRONTEND -> BACKEND
+    %% =========================
+    FE -->|REST API requests| API
+    FE -->|WebSocket connection| WS_ENDPOINT
 
-    Worker->>Broker: Pull requeued task
-    Worker->>DB: Continue normal processing flow
+    %% =========================
+    %% API INTERNAL FLOW
+    %% =========================
+    API --> JOB_ROUTES
+    API --> QUEUE_ROUTES
+    API --> WS_ENDPOINT
+
+    JOB_ROUTES --> JOB_SERVICE
+    QUEUE_ROUTES --> JOB_SERVICE
+
+    %% =========================
+    %% SERVICE -> DATABASE
+    %% =========================
+    JOB_SERVICE -->|create / update / query jobs| DB
+    DB --> JOBS_TABLE
+    DB --> ATTEMPTS_TABLE
+    DB --> EVENTS_TABLE
+
+    %% =========================
+    %% JOB DISPATCH FLOW
+    %% =========================
+    JOB_SERVICE -->|dispatch supported jobs| CELERY_QUEUE
+    CELERY_QUEUE --> WORKER
+    REDIS --> CELERY_QUEUE
+
+    %% =========================
+    %% WORKER EXECUTION FLOW
+    %% =========================
+    WORKER --> TASK_SLEEP
+    WORKER --> TASK_FAIL
+
+    TASK_SLEEP -->|mark processing / completed| JOB_SERVICE
+    TASK_FAIL -->|mark processing / failed / retry / DLQ| JOB_SERVICE
+
+    %% =========================
+    %% RELIABILITY / RETRY FLOW
+    %% =========================
+    JOB_SERVICE -->|create attempt row| ATTEMPTS_TABLE
+    JOB_SERVICE -->|append timeline event| EVENTS_TABLE
+    JOB_SERVICE -->|update status / result / error / retry metadata| JOBS_TABLE
+
+    %% =========================
+    %% RETRY / DLQ LOGIC
+    %% =========================
+    JOB_SERVICE -->|if failure and retries remain -> schedule retry| CELERY_QUEUE
+    JOB_SERVICE -->|if retries exhausted -> mark dead_lettered| JOBS_TABLE
+
+    %% =========================
+    %% REALTIME EVENT FLOW
+    %% =========================
+    JOB_SERVICE --> EVENTS
+    EVENTS -->|publish lifecycle event| REDIS
+    REDIS --> LISTENER
+    LISTENER --> WS_ENDPOINT
+    WS_ENDPOINT -->|broadcast live updates| FE
+
+    %% =========================
+    %% REQUEUE FLOW
+    %% =========================
+    FE -->|POST /jobs/:id/requeue| JOB_ROUTES
+    JOB_ROUTES --> JOB_SERVICE
+    JOB_SERVICE -->|reset DLQ metadata + redispatch| CELERY_QUEUE
