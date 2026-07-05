@@ -54,6 +54,8 @@ Backend state transitions publish structured payloads to a Redis Pub/Sub channel
 
 ---
 
+
+
 ## 3. Tech Stack
 
 ### Backend
@@ -73,52 +75,80 @@ Backend state transitions publish structured payloads to a Redis Pub/Sub channel
 
 ---
 
-## 4. Architecture Overview
+## 4. System Design Highlights
+
+TaskForge is designed to showcase backend and distributed-systems concepts that are usually hidden behind internal tooling:
+
+- **Durable job state modeling** in PostgreSQL instead of treating the message broker as the source of truth
+- **Asynchronous worker execution** using Celery + Redis with queue-based dispatch
+- **Retry orchestration with progressive backoff** and explicit dead-letter transitions
+- **Persistent execution observability** through separate `jobs`, `job_attempts`, and `job_events` tables
+- **Realtime monitoring pipeline** using Redis Pub/Sub and FastAPI WebSocket broadcasting
+- **Operator recovery workflows** through dashboard-based dead-letter inspection and requeueing
+
+## 5. Architecture Overview
 
 TaskForge separates job processing from state tracking. The API handles client actions and queries, Celery handles job execution, and PostgreSQL maintains the system state.
 
 ```
-                                 REST GET / POST
-     +------------------+ <--------------------------+
-     |                  |                            |
-     | Next.js Frontend | <-----------------+        |
-     |  (Dashboard &    |   WebSocket Event |        |
-     |   Control Plane) |   Broadcasting    |        |
-     +------------------+                   |        |
-              |                             |        |
-              | Dispatch Run                |        |
-              v                             |        |
-     +------------------+                   |        |
-     |                  |                   |        |
-     | FastAPI Backend  |                   |        |
-     |  (Jobs/Queues    |                   |        |
-     |   REST Endpoint) |                   |        |
-     +------------------+                   |        |
-       |              |                     |        |
-       | SQL Write    | Dispatch            |        |
-       v              v                     |        |
-  +--------+   +-------------------+        |        |
-  | Post-  |   | Redis Task Broker |        |        |
-  | gres   |   | (Celery Queue)    |        |        |
-  +--------+   +-------------------+        |        |
-       ^              |                     |        |
-       |              v                     |        |
-       |       +-------------------+        |        |
-       | Read/ | Celery Workers    |        |        |
-       | Write |  (demo_sleep /    |        |        |
-       | Stats |   demo_fail)      |        |        |
-       |       +-------------------+        |        |
-       |              |                     |        |
-       |              v publish event       |        |
-       |       +-------------------+        |        |
-       +-------| Redis Pub/Sub     |--------+--------+
-               | Channel           |
-               +-------------------+
++--------------------------------------------------------------------------------------------------+
+|                                           TASKFORGE                                              |
++--------------------------------------------------------------------------------------------------+
+
+   Operator / Browser
+          |
+          |  REST + WebSocket
+          v
++---------------------------+                 +----------------------------------+
+|   Next.js Dashboard       |                 |         FastAPI Backend          |
+|---------------------------|                 |----------------------------------|
+| /dashboard                |<--------------->| Jobs API / Queues API / WS API   |
+| /jobs                     |                 | Job dispatch + query endpoints    |
+| /jobs/[id]                |                 +------------------+---------------+
+| /dead-letter              |                                    |
+| /queues                   |                                    |
++---------------------------+                                    v
+                                                   +-----------------------------+
+                                                   |      Job Service Layer       |
+                                                   |-----------------------------|
+                                                   | create / dispatch jobs       |
+                                                   | mark processing/completed    |
+                                                   | mark failed / retry / DLQ    |
+                                                   | requeue dead-lettered jobs   |
+                                                   | publish realtime events      |
+                                                   +--------+-----------+---------+
+                                                            |           |
+                                         persistent state   |           | async dispatch / events
+                                                            |           |
+                                                            v           v
+                                           +--------------------+   +--------------------+
+                                           |    PostgreSQL      |   |       Redis        |
+                                           |--------------------|   |--------------------|
+                                           | jobs               |   | Celery broker      |
+                                           | job_attempts       |   | Pub/Sub channel    |
+                                           | job_events         |   +---------+----------+
+                                           +--------------------+             |
+                                                                              |
+                                                                              v
+                                                                  +----------------------+
+                                                                  |    Celery Worker     |
+                                                                  |----------------------|
+                                                                  | demo_sleep           |
+                                                                  | demo_fail            |
+                                                                  | task execution       |
+                                                                  +----------+-----------+
+                                                                             |
+                                                                             | updates job state through service layer
+                                                                             v
+                                                                   +----------------------+
+                                                                   |  PostgreSQL + Redis  |
+                                                                   | state updates + RT   |
+                                                                   +----------------------+
 ```
 
 ---
 
-## 5. System Components
+## 6. System Components
 
 | Component | Technology | Role |
 | :--- | :--- | :--- |
@@ -131,7 +161,7 @@ TaskForge separates job processing from state tracking. The API handles client a
 
 ---
 
-## 6. Data Model
+## 7. Data Model
 
 The database schema, implemented in `backend/app/models/`, consists of three core tables:
 
@@ -171,7 +201,7 @@ Chronological database of lifecycle events for auditing and trace generation.
 
 ---
 
-## 7. Job Lifecycle
+## 8. Job Lifecycle
 
 ```
     [ Operator ]              [ API ]              [ Database ]            [ Worker ]
@@ -201,7 +231,7 @@ Chronological database of lifecycle events for auditing and trace generation.
 
 ---
 
-## 8. Reliability and Retry Strategy
+## 9. Reliability and Retry Strategy
 
 TaskForge uses state-backed retry coordination instead of Celery's transient internal retry mechanism:
 
@@ -214,7 +244,7 @@ TaskForge uses state-backed retry coordination instead of Celery's transient int
 
 ---
 
-## 9. Real-time Monitoring
+## 10. Real-time Monitoring
 
 Real-time monitoring is implemented via Redis Pub/Sub:
 
@@ -236,20 +266,27 @@ Real-time monitoring is implemented via Redis Pub/Sub:
 
 ---
 
-## 10. Dashboard Structure
+## 11. Dashboard Structure
 
-The operator interface contains five views:
+The frontend is intentionally designed as a control plane rather than a marketing UI. It supports three primary operator workflows:
 
-* **Dashboard Overview (`/dashboard`)**: Summary status cards, active queue backlog statistics, recent activity records, and the live log stream.
-* **Dispatch Job Panel**: Form overlay to select job types (`demo_sleep` or `demo_fail`), specify queue names, customize JSON payloads, and define retry budgets.
-* **Jobs Explorer (`/jobs`)**: Filterable table with page navigation.
-* **Job Detail Observability (`/jobs/[id]`)**: Detailed inspection view showing attempt records, error tracebacks, request/response payloads, and the timeline audit trace.
-* **Dead Letter Center (`/dead-letter`)**: Lists failed jobs with row-level controls to requeue them.
-* **Queues Overview (`/queues`)**: Health view showing backlog distribution and queue pressure metrics.
+### 1. Dispatch and Observe Jobs
+From the dashboard header / dispatch modal, an operator can enqueue a new `demo_sleep` or `demo_fail` job, choose a queue, provide a JSON payload, and set a retry budget.
+
+### 2. Investigate Job Execution
+The `/jobs` and `/jobs/[id]` pages allow operators to inspect:
+- current job state
+- payload and result data
+- per-attempt execution history
+- failure messages
+- chronological lifecycle events
+
+### 3. Recover Failed Work
+The `/dead-letter` page exposes dead-lettered jobs and allows operators to requeue them after inspection.
 
 ---
 
-## 11. API Routes
+## 12. API Routes
 
 | HTTP Method | Route | Description |
 | :--- | :--- | :--- |
@@ -262,7 +299,7 @@ The operator interface contains five views:
 
 ---
 
-## 12. Project Structure
+## 13. Project Structure
 
 ```
 TaskForge/
@@ -289,7 +326,7 @@ TaskForge/
 
 ---
 
-## 13. Local Setup
+## 14. Local Setup
 
 ### Prerequisites
 * Docker and Docker Compose
@@ -348,7 +385,7 @@ TaskForge/
 
 ---
 
-## 14. Demo Workflows
+## 15. Demo Workflows
 
 ### 1. Happy Path Execution
 * Click **Dispatch Job** in the header.
@@ -368,16 +405,21 @@ TaskForge/
 
 ---
 
-## 15. What This Project Demonstrates
+## 16. What This Project Demonstrates
 
-* **Durable State Design**: The database tracks job status, decoupling execution history from transient brokers.
-* **State-Backed Retries**: Shows how to orchestrate task retries with progressive backoffs using database coordination.
-* **Real-time Event Architecture**: Integrates Redis Pub/Sub with WebSocket connections to push updates to client interfaces.
-* **Control Plane UI**: Demonstrates clean observability dashboards for managing background task workflows.
+ TaskForge was built as a backend/system-design flagship project and demonstrates:
+
+- **Asynchronous background job execution** using Celery workers and Redis queues
+- **Durable state modeling** where PostgreSQL, not the broker, acts as the source of truth for job lifecycle state
+- **Retry orchestration and dead-letter handling** with explicit persisted attempt tracking
+- **Operational observability** through timeline events, per-attempt history, and realtime dashboard updates
+- **Realtime event streaming** using Redis Pub/Sub and FastAPI WebSocket broadcasting
+- **Operator tooling / control-plane design** for dispatching, inspecting, and recovering background work
+- **Containerized local infrastructure** using Docker Compose for reproducible development setup
 
 ---
 
-## 16. Future Improvements
+## 17. Future Improvements
 
 * **Priority Queuing**: Support scheduling task execution using broker priority lanes.
 * **Autoscaling Workers**: Configure Celery process pools to scale based on queue depth metrics.
