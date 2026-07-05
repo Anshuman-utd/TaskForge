@@ -17,6 +17,7 @@ export default function DeadLetterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actioningJobId, setActioningJobId] = useState<string | null>(null);
+  const [successJobId, setSuccessJobId] = useState<string | null>(null);
 
   const loadDlqJobs = async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -40,7 +41,7 @@ export default function DeadLetterPage() {
     loadDlqJobs(true);
 
     const unsubscribe = wsClient.subscribe(() => {
-      // Light update
+      // Light update when any WS event occurs
       loadDlqJobs(false);
     });
 
@@ -51,9 +52,15 @@ export default function DeadLetterPage() {
 
   const handleRequeue = async (id: string) => {
     setActioningJobId(id);
+    setSuccessJobId(null);
     try {
       await api.requeueJob(id);
-      await loadDlqJobs(false);
+      setSuccessJobId(id);
+      // Brief delay to let the user see the success status before it transitions away
+      setTimeout(async () => {
+        setSuccessJobId(null);
+        await loadDlqJobs(false);
+      }, 800);
     } catch (e: any) {
       alert(`Failed to requeue job: ${e.message}`);
     } finally {
@@ -103,33 +110,49 @@ export default function DeadLetterPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobs.map((job) => (
-                <TableRow key={job.id}>
-                  <TableCell className="font-mono text-neutral-300">
-                    <Link href={`/jobs/${job.id}`} className="hover:underline text-blue-400 font-semibold">
-                      {truncateId(job.id)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-semibold text-foreground">{job.job_type}</TableCell>
-                  <TableCell className="text-muted">{job.queue_name}</TableCell>
-                  <TableCell className="font-mono text-neutral-400">{job.attempt_count} / {job.max_retries}</TableCell>
-                  <TableCell className="text-muted text-[11px]">{formatTimestamp(job.dead_lettered_at)}</TableCell>
-                  <TableCell className="font-mono text-rose-450 text-[11px] max-w-[200px] truncate" title={job.last_error_message || ""}>
-                    {job.last_error_message || "-"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button 
-                      variant="primary" 
-                      size="sm" 
-                      isLoading={actioningJobId === job.id} 
-                      onClick={() => handleRequeue(job.id)}
-                      className="text-[10px] font-semibold py-1 px-2.5 cursor-pointer"
-                    >
-                      Requeue
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {jobs.map((job) => {
+                const isRequeueingThis = actioningJobId === job.id;
+                const isSuccessThis = successJobId === job.id;
+                const isAnyActioning = actioningJobId !== null;
+
+                return (
+                  <TableRow 
+                    key={job.id}
+                    className={isSuccessThis ? "bg-emerald-950/20 border-l-2 border-l-emerald-500 transition-all duration-300" : ""}
+                  >
+                    <TableCell className="font-mono text-neutral-300">
+                      <Link href={`/jobs/${job.id}`} className="hover:underline text-blue-400 font-semibold">
+                        {truncateId(job.id)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="font-semibold text-foreground">{job.job_type}</TableCell>
+                    <TableCell className="text-muted">{job.queue_name}</TableCell>
+                    <TableCell className="font-mono text-neutral-400">{job.attempt_count} / {job.max_retries}</TableCell>
+                    <TableCell className="text-muted text-[11px] font-mono">{formatTimestamp(job.dead_lettered_at)}</TableCell>
+                    <TableCell className="font-mono text-rose-400 text-[11px] max-w-[240px] truncate" title={job.last_error_message || ""}>
+                      {job.last_error_message || "-"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isSuccessThis ? (
+                        <span className="text-[10px] font-mono text-emerald-400 font-semibold px-2.5 py-1 bg-emerald-500/10 rounded border border-emerald-500/20">
+                          SUCCESS
+                        </span>
+                      ) : (
+                        <Button 
+                          variant="primary" 
+                          size="sm" 
+                          isLoading={isRequeueingThis} 
+                          onClick={() => handleRequeue(job.id)}
+                          disabled={isAnyActioning}
+                          className="text-[10px] font-semibold py-1 px-2.5 cursor-pointer"
+                        >
+                          Requeue
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

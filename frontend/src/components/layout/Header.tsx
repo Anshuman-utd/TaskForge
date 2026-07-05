@@ -1,9 +1,9 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { wsClient, ConnectionState } from "@/lib/websocket/client";
-import { api } from "@/lib/api/client";
 import { Button } from "../ui/Button";
 import { RefreshIcon, PlusIcon } from "../icons";
+import { DispatchJobModal } from "../dashboard/DispatchJobModal";
 
 interface HeaderProps {
   title: string;
@@ -11,7 +11,7 @@ interface HeaderProps {
 
 export function Header({ title }: HeaderProps) {
   const [wsState, setWsState] = useState<ConnectionState>("DISCONNECTED");
-  const [isDispatching, setIsDispatching] = useState(false);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
 
   useEffect(() => {
     // Subscribe to WebSocket state updates
@@ -27,21 +27,6 @@ export function Header({ title }: HeaderProps) {
 
   const handleManualReconnect = () => {
     wsClient.connect();
-  };
-
-  const handleDispatchDemo = async (type: "sleep" | "fail") => {
-    setIsDispatching(true);
-    try {
-      if (type === "sleep") {
-        await api.createJob("demo_sleep", "default", { duration: 3 }, 2);
-      } else {
-        await api.createJob("demo_fail", "default", {}, 1);
-      }
-    } catch (e: any) {
-      alert(`Failed to dispatch demo job: ${e.message}`);
-    } finally {
-      setIsDispatching(false);
-    }
   };
 
   return (
@@ -89,28 +74,25 @@ export function Header({ title }: HeaderProps) {
         {/* Separator */}
         <span className="h-4 w-px bg-border"></span>
 
-        {/* Quick Action Buttons */}
-        <div className="flex items-center space-x-2">
+        {/* Dispatch Action */}
+        <div>
           <Button 
             size="sm" 
-            variant="secondary" 
-            isLoading={isDispatching} 
-            onClick={() => handleDispatchDemo("sleep")}
-            className="text-[11px] font-semibold py-1 px-2.5"
+            variant="primary" 
+            onClick={() => setIsDispatchModalOpen(true)}
+            className="text-[11px] font-semibold py-1 px-2.5 cursor-pointer"
           >
-            <PlusIcon size={12} className="mr-1.5" />
-            Test Sleep Job
+            <PlusIcon size={12} className="mr-1.5 text-neutral-900" />
+            Dispatch Job
           </Button>
-          <Button 
-            size="sm" 
-            variant="danger" 
-            isLoading={isDispatching} 
-            onClick={() => handleDispatchDemo("fail")}
-            className="text-[11px] font-semibold py-1 px-2.5"
-          >
-            <PlusIcon size={12} className="mr-1.5 text-rose-400" />
-            Test Fail Job
-          </Button>
+          
+          <DispatchJobModal 
+            isOpen={isDispatchModalOpen} 
+            onClose={() => setIsDispatchModalOpen(false)}
+            onSuccess={() => {
+              window.dispatchEvent(new CustomEvent("job-dispatched"));
+            }}
+          />
         </div>
       </div>
     </header>
