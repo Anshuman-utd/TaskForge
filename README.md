@@ -1,4 +1,7 @@
 # TaskForge 
+
+###TaskForge is a distributed job processing platform and operator control plane built to demonstrate backend system design, database-backed reliability patterns, and real-time observability.
+
 <p align="left">
   <img src="https://img.shields.io/badge/FastAPI-0d1117?style=for-the-badge&logo=fastapi&logoColor=009688" />
   <img src="https://img.shields.io/badge/Python-0d1117?style=for-the-badge&logo=python&logoColor=3776AB" />
@@ -13,10 +16,6 @@
   <img src="https://img.shields.io/badge/Docker-0d1117?style=for-the-badge&logo=docker&logoColor=2496ED" />
   <img src="https://img.shields.io/badge/WebSockets-0d1117?style=for-the-badge&logo=socketdotio&logoColor=ffffff" />
 </p>
-
-
-
-TaskForge is a distributed job processing platform and operator control plane built to demonstrate backend system design, database-backed reliability patterns, and real-time observability.
 
 The system integrates a FastAPI application, PostgreSQL database, Redis broker, and Celery background workers alongside a Next.js App Router operator control panel. TaskForge provides durability guarantees for job states, handles execution failures using automated retries with progressive exponential backoffs, transitions stalled jobs into a Dead-Letter Queue (DLQ), and streams live lifecycle updates to dashboard clients over WebSockets.
 
