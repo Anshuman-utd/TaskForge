@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    CORS_ALLOWED_ORIGINS: str ='http://localhost:3000'
+
 
 @lru_cache
 def get_settings() -> Settings:
