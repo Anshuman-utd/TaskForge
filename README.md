@@ -1,6 +1,4 @@
-# TaskForge
-
-<p align="left">
+# TaskForge <p align="left">
   <img src="https://img.shields.io/badge/FastAPI-0d1117?style=for-the-badge&logo=fastapi&logoColor=009688" />
   <img src="https://img.shields.io/badge/Python-0d1117?style=for-the-badge&logo=python&logoColor=3776AB" />
   <img src="https://img.shields.io/badge/Celery-0d1117?style=for-the-badge&logo=celery&logoColor=37814A" />
@@ -14,6 +12,8 @@
   <img src="https://img.shields.io/badge/Docker-0d1117?style=for-the-badge&logo=docker&logoColor=2496ED" />
   <img src="https://img.shields.io/badge/WebSockets-0d1117?style=for-the-badge&logo=socketdotio&logoColor=ffffff" />
 </p>
+
+
 
 TaskForge is a distributed job processing platform and operator control plane built to demonstrate backend system design, database-backed reliability patterns, and real-time observability.
 
